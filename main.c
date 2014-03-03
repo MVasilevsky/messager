@@ -5,18 +5,19 @@
  * Created on 1 Март 2014 г., 19:24
  */
 
+#define _WIN32_WINNT  0x501
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <arpa/inet.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #include <errno.h>
 #include <unistd.h>
 
 #define WAITING_CONNECTIONS 10
-#define MESSAGE_SIZE 1
+#define MESSAGE_SIZE 512
 #define PORT "5680"
 
 /*
@@ -24,8 +25,17 @@
  */
 int main(int argc, char** argv) {
 
+    WSADATA wsaData;
+    int iResult;
+
+    if ((iResult = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0) {
+        printf("WSAStartup failed: %d\n", iResult);
+        exit(10);
+    }
+
     fd_set connections, read_fds;
-    int status, listener, newfd, fdmax;
+    SOCKET listener, newfd;
+    int status, fdmax;
     struct addrinfo hints, *result;
     struct sockaddr_storage remoteaddr;
     char stradr [INET_ADDRSTRLEN];
@@ -38,35 +48,35 @@ int main(int argc, char** argv) {
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC; // неважно, IPv4 или IPv6
     hints.ai_socktype = SOCK_STREAM; // TCP stream-sockets
-    hints.ai_flags = AI_PASSIVE;
+//    hints.ai_flags = AI_PASSIVE;
 
     // obtain address info
-    if ((status = getaddrinfo(NULL, PORT, &hints, &result)) != 0) {
-        printf("getaddrinfo error: %s\n", gai_strerror(status));
+    if ((status = getaddrinfo("192.168.118.63", PORT, &hints, &result)) != 0) {
+        printf("getaddrinfo error: %s\n", strerror(WSAGetLastError()));
         exit(1);
     }
 
     // socket creation
     if ((listener = socket(result->ai_family, result->ai_socktype, result->ai_protocol)) == -1) {
-        printf("socket error: %s\n", strerror(errno));
+        printf("socket error: %d\n", WSAGetLastError());
         exit(2);
     }
 
-    freeaddrinfo(result);
+//    freeaddrinfo(result);
 
     // can reuse
     int yes = 1;
-    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof (int));
+    setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, (char *) &yes, sizeof (int));
 
     // assign the address to the socket
     if ((bind(listener, result->ai_addr, result->ai_addrlen)) == -1) {
-        printf("bind error: %s\n", strerror(errno));
+        printf("bind error: %d\n", WSAGetLastError());
         exit(3);
     }
 
     // listen
     if ((listen(listener, WAITING_CONNECTIONS)) == -1) {
-        printf("listen error: %s\n", strerror(errno));
+        printf("listen error: %d\n", WSAGetLastError());
         exit(4);
     }
 
@@ -96,8 +106,8 @@ int main(int argc, char** argv) {
                         if (newfd > fdmax) { // продолжаем отслеживать самый большой номер дескиптора
                             fdmax = newfd;
                         }
-                        inet_ntop(remoteaddr.ss_family, &(((struct sockaddr_in *) &remoteaddr)->sin_addr), stradr, sizeof stradr);
-                        printf("new connection from %s on socket %d\n", stradr, newfd);
+                        // IPv4
+                        printf("new connection from %s on socket %d\n", inet_ntoa(((struct sockaddr_in *) &remoteaddr)->sin_addr), newfd);
                     }
                 } else {
                     // обрабатываем данные клиента
@@ -109,7 +119,7 @@ int main(int argc, char** argv) {
                         } else {
                             perror("recv");
                         }
-                        close(i); // bye!
+                        closesocket(i); // bye!
                         FD_CLR(i, &connections); // удаляем из мастер-сета
                     } else {
                         // у нас есть какие-то данные от клиента
@@ -128,6 +138,6 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-        } 
+        }
     }
 }
